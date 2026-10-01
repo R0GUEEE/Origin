@@ -216,7 +216,7 @@ jobs:
           # could have fixed it.
           mode=$(awk '/origin-helper$/ { print $1 }' listing.txt)
           case "$mode" in
-            rws*|r-s*) echo "helper mode $mode" ;;
+            -rws*|-r-s*) echo "helper mode $mode (setuid root)" ;;
             *) echo "::error::origin-helper is $mode, expected the setuid bit"; exit 1 ;;
           esac
 
