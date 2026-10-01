@@ -1,0 +1,16 @@
+#!/bin/bash
+# Remove what postinst created outside the package's own file list, and leave
+# the user's snapshots alone: uninstalling the app is not a reason to lose the
+# backups that would let them put their sources back.
+set -u
+
+if [ -n "${CYDIA:-}" ]; then
+    read -r fd ver <<EOT
+$CYDIA
+EOT
+    if [ "$ver" -ge 1 ] 2>/dev/null; then
+        echo "finish:restart" >&$fd
+    fi
+fi
+
+exit 0

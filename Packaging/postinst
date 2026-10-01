@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# Origin's postinst exists for exactly one reason dpkg cannot handle: the setuid
+# bit on origin-helper. It is applied here rather than trusting the archive,
+# because some extraction paths drop it, and a helper without it turns every
+# write into a confusing "not permitted" instead of a clear failure.
+#
+# The layout is detected at run time, so the same script serves both packages.
+set -u
+
+ROOT=""
+if [ -d /var/jb ]; then
+    ROOT="/var/jb"
+fi
+
+HELPER="$ROOT/usr/libexec/origin/origin-helper"
+STATE="/var/mobile/Library/Origin"
+
+if [ -f "$HELPER" ]; then
+    chown 0:0 "$HELPER" 2>/dev/null || true
+    chmod 4755 "$HELPER" 2>/dev/null || true
+    echo "Origin: origin-helper installed setuid root"
+else
+    echo "Origin: WARNING — origin-helper is missing, the app will be read-only"
+fi
+
+# The app writes its snapshots here as mobile, and root creates the directory.
+mkdir -p "$STATE/Backups" 2>/dev/null || true
+chown -R mobile:mobile "$STATE" 2>/dev/null || true
+chmod 755 "$STATE" "$STATE/Backups" 2>/dev/null || true
+
+# Register the app so it appears without a full respring where the tool exists.
+for UICACHE in "$ROOT/usr/bin/uicache" /usr/bin/uicache; do
+    if [ -x "$UICACHE" ]; then
+        "$UICACHE" -p "$ROOT/Applications/Origin.app" >/dev/null 2>&1 || true
+        break
+    fi
+done
+
+if [ -n "${CYDIA:-}" ]; then
+    read -r fd ver <<EOT
+$CYDIA
+EOT
+    if [ "$ver" -ge 1 ] 2>/dev/null; then
+        echo "finish:restart" >&$fd
+    fi
+fi
+
+exit 0

@@ -31,6 +31,18 @@ public struct SourceBackup: Codable, Hashable, Sendable {
     }
 }
 
+public struct BackupRecord: Hashable, Sendable, Identifiable {
+    public var path: String
+    public var backup: SourceBackup
+
+    public var id: String { path }
+
+    public init(path: String, backup: SourceBackup) {
+        self.path = path
+        self.backup = backup
+    }
+}
+
 public struct BackupStore {
 
     public let directory: String
@@ -100,6 +112,15 @@ public struct BackupStore {
     public func load(path: String) -> SourceBackup? {
         guard let data = fileManager.contents(atPath: path) else { return nil }
         return try? BackupStore.decoder.decode(SourceBackup.self, from: data)
+    }
+
+    /// A snapshot together with the file it lives in. The UI needs both: the
+    /// snapshot to restore, the path to delete.
+    public func records() -> [BackupRecord] {
+        paths().compactMap { path in
+            guard let backup = load(path: path) else { return nil }
+            return BackupRecord(path: path, backup: backup)
+        }
     }
 
     /// A restore is an ordinary plan: the backup's contents become the desired

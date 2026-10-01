@@ -1,0 +1,20 @@
+Package: com.r0gueee.origin
+Name: Origin
+Version: @VERSION@
+Architecture: @ARCH@
+Section: Utilities
+Priority: optional
+Maintainer: r0gueee <r0gueee@users.noreply.github.com>
+Pre-Depends: firmware (>= 15.0.0)
+Description: Manage APT sources on the device
+ Origin reads and writes the sources files Sileo, Zebra and apt use, in both the
+ one-line and the deb822 spelling, and shows you exactly what it is about to
+ write before it writes it. Every change is snapshotted first and can be undone.
+ .
+ It never rewrites a line it was not asked to change, so comments, blank lines
+ and fields it does not model survive an edit untouched.
+ .
+ One build covers both jailbreak layouts: on a rootless jailbreak everything
+ lives under /var/jb, on a rootful one it does not. The two paths differ only in
+ the engine's layout table, not in the binary.
+Homepage: https://github.com/R0GUEEE/Origin

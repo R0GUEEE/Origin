@@ -1,0 +1,231 @@
+name: App Build
+
+# Builds the SwiftUI app and origin-helper, then packages them as jailbreak
+# debs.
+#
+# Two jobs on purpose: `build` produces the bundle and the helper once (Xcode is
+# the slow part), then the matrix job packages them twice — rootless and rootful
+# — which is the only thing that differs between the two artifacts.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'App/**'
+      - 'Sources/**'
+      - 'Helper/**'
+      - 'Packaging/**'
+      - 'Package.swift'
+      - '.github/workflows/app-build.yml'
+  pull_request:
+    paths:
+      - 'App/**'
+      - 'Sources/**'
+      - 'Helper/**'
+      - 'Packaging/**'
+      - 'Package.swift'
+      - '.github/workflows/app-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_BUNDLE_NAME: Origin.app
+  SCHEME: Origin
+  DERIVED_DATA: build
+  PRODUCTS_DIR: build/Build/Products/Release-iphoneos
+  APP_BUNDLE_PATH: build/Build/Products/Release-iphoneos/Origin.app
+
+jobs:
+  build:
+    name: Build Origin.app and origin-helper
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tooling
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          brew install ldid dpkg
+          xcodegen --version
+          ldid -v | head -n 1 || true
+          dpkg-deb --version
+
+      - name: Warm up SwiftPM and run the engine tests
+        run: |
+          set -euo pipefail
+          # The app is a shell over the engine; there is no point building the
+          # shell if what it drives is broken.
+          swift build
+          swift test
+
+      - name: Generate the Xcode project
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec App/project.yml --project App
+
+      - name: Build the app bundle
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project App/Origin.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Build origin-helper
+        run: |
+          set -euo pipefail
+          mkdir -p "$DERIVED_DATA/helper"
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -miphoneos-version-min=15.0 \
+            -O2 -Wall -Wextra \
+            -o "$DERIVED_DATA/helper/origin-helper" \
+            Helper/origin-helper.c
+          file "$DERIVED_DATA/helper/origin-helper"
+          lipo -info "$DERIVED_DATA/helper/origin-helper"
+
+      - name: Verify the app bundle and the helper
+        run: |
+          set -euo pipefail
+          test -d "$APP_BUNDLE_PATH" || { echo "::error::$APP_BUNDLE_PATH was not produced"; exit 1; }
+          test -x "$APP_BUNDLE_PATH/Origin" || { echo "::error::$APP_BUNDLE_PATH/Origin is missing or not executable"; exit 1; }
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_BUNDLE_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_BUNDLE_PATH/Info.plist"
+          lipo -info "$APP_BUNDLE_PATH/Origin"
+          # The entitlements cannot be applied by Apple's signing, but the app
+          # has to be *built* expecting them: a missing platform-application is
+          # the difference between an app that can exec the helper and one that
+          # is killed at launch.
+          grep -q 'platform-application' App/Origin.entitlements
+          grep -q 'run-unsigned-code' App/Origin.entitlements
+
+      - name: Upload the app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: origin-app
+          # The *containing* directory is uploaded on purpose: upload-artifact
+          # keeps paths relative to the uploaded root, so Release-iphoneos/ lands
+          # an Origin.app/ at the top of the artifact and the packaging job finds
+          # it without guessing.
+          path: ${{ env.PRODUCTS_DIR }}/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload origin-helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: origin-helper
+          path: ${{ env.DERIVED_DATA }}/helper/origin-helper
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Package .deb (${{ matrix.layout }})
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        layout:
+          - rootless
+          - rootful
+    steps:
+      - name: Checkout (for Packaging/)
+        uses: actions/checkout@v4
+
+      - name: Install packaging tooling
+        run: |
+          set -euo pipefail
+          brew install ldid dpkg
+          dpkg-deb --version
+
+      - name: Download the app bundle and the helper
+        uses: actions/download-artifact@v4
+        with:
+          pattern: origin-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Restore file modes
+        # upload-artifact/download-artifact does not guarantee the executable bit
+        # survives the round trip, and build-deb.sh refuses a bundle whose main
+        # binary is not executable.
+        run: |
+          set -euo pipefail
+          find "$PWD/artifacts" -maxdepth 3 | head -20
+          APP=$(find "$PWD/artifacts" -type d -name "$APP_BUNDLE_NAME" -print -quit)
+          HELPER=$(find "$PWD/artifacts" -type f -name origin-helper -print -quit)
+          [ -n "$APP" ] || { echo "::error::no $APP_BUNDLE_NAME under $PWD/artifacts"; exit 1; }
+          [ -n "$HELPER" ] || { echo "::error::no origin-helper under $PWD/artifacts"; exit 1; }
+          find "$APP" -type d -exec chmod 0755 {} +
+          chmod 0755 "$APP/Origin"
+          chmod 0755 "$HELPER"
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+          echo "HELPER_PATH=$HELPER" >> "$GITHUB_ENV"
+          echo "app=$APP helper=$HELPER"
+
+      - name: Print the package layout
+        run: sh Packaging/build-deb.sh --${{ matrix.layout }} --print-layout
+
+      - name: Build the .deb
+        run: sh Packaging/build-deb.sh --${{ matrix.layout }} --output dist
+
+      - name: Assert the .deb is what it claims to be
+        run: |
+          set -euo pipefail
+          deb=$(find dist -maxdepth 1 -name 'origin_*.deb' -print | head -n 1)
+          [ -n "$deb" ] || { echo "::error::no .deb produced in dist/"; exit 1; }
+          echo "inspecting $deb"
+          dpkg-deb -I "$deb"
+          dpkg-deb -c "$deb"
+
+          prefix=$([ "${{ matrix.layout }}" = "rootless" ] && echo 'var/jb/' || echo '')
+
+          # The app and the helper have to be exactly where the layout says, or
+          # the package installs an app that cannot launch or cannot write.
+          for required in \
+            "Applications/Origin.app/Origin" \
+            "usr/libexec/origin/origin-helper"; do
+            if ! dpkg-deb -c "$deb" | grep -qE "[ /]${prefix}${required}\$"; then
+              echo "::error::$deb does not contain $prefix$required"
+              exit 1
+            fi
+          done
+
+          # The helper must ship setuid root, otherwise every write fails with a
+          # permissions error at run time and the postinst is the only thing that
+          # could have fixed it.
+          mode=$(dpkg-deb -c "$deb" | awk '/origin-helper$/ { print $1 }')
+          case "$mode" in
+            rws*|r-s*) echo "helper mode $mode" ;;
+            *) echo "::error::origin-helper is $mode, expected the setuid bit"; exit 1 ;;
+          esac
+
+          expected_arch=$([ "${{ matrix.layout }}" = "rootless" ] && echo iphoneos-arm64 || echo iphoneos-arm)
+          actual_arch=$(dpkg-deb -f "$deb" Architecture)
+          [ "$actual_arch" = "$expected_arch" ] || {
+            echo "::error::$deb declares Architecture: $actual_arch, expected $expected_arch"; exit 1; }
+          echo "OK: $deb ($actual_arch)"
+
+      - name: Upload the .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: origin-deb-${{ matrix.layout }}
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 14
