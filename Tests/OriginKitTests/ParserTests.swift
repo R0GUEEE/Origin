@@ -174,7 +174,7 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(layout.style, .rootless)
         XCTAssertEqual(layout.aptDirectory, "/var/jb/etc/apt")
         XCTAssertEqual(layout.aptSourcesDirectory, "/var/jb/etc/apt/sources.list.d")
-        XCTAssertEqual(layout.aptArchitecture, "iphoneos-arm64")
+        XCTAssertEqual(layout.style.aptArchitecture, "iphoneos-arm64")
         XCTAssertEqual(layout.helperPath, "/var/jb/usr/libexec/origin/origin-helper")
     }
 
@@ -184,7 +184,7 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(layout.aptDirectory, "/etc/apt")
         XCTAssertEqual(layout.aptSourcesDirectory, "/etc/apt/sources.list.d")
         XCTAssertEqual(layout.mainSourcesList, "/etc/apt/sources.list")
-        XCTAssertEqual(layout.aptArchitecture, "iphoneos-arm")
+        XCTAssertEqual(layout.style.aptArchitecture, "iphoneos-arm")
     }
 
     func testEnvironmentOverrideWins() {
