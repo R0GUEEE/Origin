@@ -46,7 +46,7 @@ public struct JailbreakLayout: Hashable, Sendable {
             if forced == "rootless" { return JailbreakLayout(style: .rootless) }
         }
         // A rootless bootstrap always has /var/jb; a rootful one never does.
-        if fileExists(root + "/var/jb/usr/bin/dpkg") || fileExists("/var/jb") {
+        if fileExists("/var/jb/usr/bin/dpkg") || fileExists("/var/jb") {
             return JailbreakLayout(style: .rootless)
         }
         return JailbreakLayout(style: .rootful)

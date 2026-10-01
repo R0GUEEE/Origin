@@ -69,23 +69,20 @@ public enum Subprocess {
         var argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) }
         argv.append(nil)
 
-        var envp: [UnsafeMutablePointer<CChar>?]? = nil
-        if let environment {
-            var built: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") }
-            built.append(nil)
-            envp = built
-        }
-
         var child: pid_t = 0
         let spawned: Int32
-        if envp != nil {
-            spawned = posix_spawn(&child, executable, &actions, nil, &argv, &envp!)
+        if let environment {
+            var envp: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") }
+            envp.append(nil)
+            spawned = posix_spawn(&child, executable, &actions, nil, &argv, &envp)
+            for pointer in envp where pointer != nil { free(pointer) }
         } else {
+            // A nil envp means "inherit", which is what a package manager wants:
+            // apt-get needs PATH, HOME and the proxy variables it was given.
             spawned = posix_spawn(&child, executable, &actions, nil, &argv, nil)
         }
         posix_spawn_file_actions_destroy(&actions)
         for pointer in argv where pointer != nil { free(pointer) }
-        if var built = envp { for pointer in built where pointer != nil { free(pointer) }; built = [] }
 
         guard spawned == 0 else {
             close(descriptors[0])

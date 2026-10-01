@@ -39,7 +39,7 @@ public struct SourceStore {
         for directory in layout.sourcesDirectories {
             scanned.append(directory)
             guard let names = try? fileManager.contentsOfDirectory(atPath: directory) else { continue }
-            for name in names.sorted() where isSourcesFile(name) {
+            for name in names.sorted() where SourceStore.isSourcesFile(name) {
                 let path = directory + "/" + name
                 if let file = readFile(at: path) {
                     files.append(file)
