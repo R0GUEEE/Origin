@@ -1,0 +1,58 @@
+name: Engine
+
+# The engine is deliberately free of Apple-only APIs, so it builds and is
+# tested on plain Linux. That matters: this job is ~40 s, while the macOS app
+# build is minutes, so a broken parser fails here first.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Sources/**'
+      - 'Tests/**'
+      - 'Package.swift'
+      - '.github/workflows/ci.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: Build and test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '5.10'
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        # Serial on purpose: with --parallel a test that hangs or crashes takes
+        # its worker with it and the runner prints only the signal, with no way
+        # to tell which test it was. Serial XCTest names each test as it starts.
+        run: swift test
+
+      - name: CLI smoke test
+        run: |
+          set -euo pipefail
+          binary=$(find .build -type f -name origin -perm -u+x | head -n 1)
+          echo "using $binary"
+          "$binary" roots
+          ORIGIN_LAYOUT=rootless "$binary" roots | grep -q '/var/jb/etc/apt'
+          ORIGIN_LAYOUT=rootful  "$binary" roots | grep -q 'root: *\/$'
+          # The runner has real deb822 sources files; parsing them is a free
+          # end-to-end check against input nobody wrote for this project.
+          ORIGIN_LAYOUT=rootful "$binary" files
+          ORIGIN_LAYOUT=rootful "$binary" list --json | head -c 400
+          echo
