@@ -192,7 +192,11 @@ jobs:
           [ -n "$deb" ] || { echo "::error::no .deb produced in dist/"; exit 1; }
           echo "inspecting $deb"
           dpkg-deb -I "$deb"
-          dpkg-deb -c "$deb"
+          # Listed to a file rather than piped into grep: with `pipefail`, grep -q
+          # exits at the first match, dpkg-deb takes SIGPIPE, and the whole step
+          # fails on a package that is perfectly fine.
+          dpkg-deb -c "$deb" > listing.txt
+          cat listing.txt
 
           prefix=$([ "${{ matrix.layout }}" = "rootless" ] && echo 'var/jb/' || echo '')
 
@@ -201,7 +205,7 @@ jobs:
           for required in \
             "Applications/Origin.app/Origin" \
             "usr/libexec/origin/origin-helper"; do
-            if ! dpkg-deb -c "$deb" | grep -qE "[ /]${prefix}${required}\$"; then
+            if ! grep -qE "[ /]${prefix}${required}$" listing.txt; then
               echo "::error::$deb does not contain $prefix$required"
               exit 1
             fi
@@ -210,7 +214,7 @@ jobs:
           # The helper must ship setuid root, otherwise every write fails with a
           # permissions error at run time and the postinst is the only thing that
           # could have fixed it.
-          mode=$(dpkg-deb -c "$deb" | awk '/origin-helper$/ { print $1 }')
+          mode=$(awk '/origin-helper$/ { print $1 }' listing.txt)
           case "$mode" in
             rws*|r-s*) echo "helper mode $mode" ;;
             *) echo "::error::origin-helper is $mode, expected the setuid bit"; exit 1 ;;
