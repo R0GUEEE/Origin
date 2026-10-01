@@ -143,7 +143,7 @@ final class Deb822Tests: XCTestCase {
             if case .repository(let repo) = entry { return repo }
             return nil
         }.first
-        XCTAssertEqual(repository?.extraFields["targets"], "iphoneos-arm64")
+        XCTAssertEqual(repository?.extraFields["Targets"], "iphoneos-arm64", "the spelling the file used is preserved")
         XCTAssertTrue(Deb822.stanza(for: repository!).contains("Targets: iphoneos-arm64"))
     }
 

@@ -118,6 +118,18 @@ static int destination_is_allowed(const char *path) {
  * validated the input — it exists so a hostile caller cannot use this helper to
  * write, say, a launch daemon plist into the sources directory.
  */
+/* "Types" / "X-Whatever" / "Targets" — a deb822 field name. */
+static int is_deb822_field(const char *line, size_t length) {
+    size_t index = 0;
+    if (length == 0 || !((line[0] >= 'A' && line[0] <= 'Z') || (line[0] >= 'a' && line[0] <= 'z'))) return 0;
+    while (index < length && line[index] != ':') {
+        char c = line[index];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return 0;
+        index++;
+    }
+    return index > 0 && index < length && line[index] == ':';
+}
+
 static int content_looks_like_sources(const char *buffer, size_t length) {
     static const char *allowedPrefixes[] = {
         "deb ", "deb-src ", "Types:", "URIs:", "Suites:", "Components:",
@@ -147,6 +159,12 @@ static int content_looks_like_sources(const char *buffer, size_t length) {
                     break;
                 }
             }
+            /* A deb822 field: a name made of letters, digits and hyphens,
+             * followed by a colon. This is what lets an unmodelled field such
+             * as "Targets:" through while still rejecting anything that is not a
+             * sources file at all. */
+            if (!matched && is_deb822_field(buffer + begin, end - begin)) matched = 1;
+
             if (!matched) return 0;
             saw_real_line = 1;
         }

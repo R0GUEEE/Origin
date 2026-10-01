@@ -106,30 +106,36 @@ public enum Deb822 {
     }
 
     private static func entry(from stanza: [(key: String, value: String)]) -> StanzaOutcome {
-        var fields: [String: String] = [:]
+        // Field names are matched case-insensitively (apt accepts `URIs:` and
+        // `uris:` alike) but remembered in the spelling the file used, so a
+        // field Origin does not model comes back out looking the way its author
+        // wrote it rather than lower-cased by us.
+        var values: [String: String] = [:]
+        var spellings: [String: String] = [:]
         var order: [String] = []
         for field in stanza {
             let key = field.key.lowercased()
-            if fields[key] != nil { continue }
-            fields[key] = field.value
+            if values[key] != nil { continue }
+            values[key] = field.value
+            spellings[key] = field.key
             order.append(key)
         }
 
-        guard let uris = fields["uris"], !uris.isEmpty else {
+        guard let uris = values["uris"], !uris.isEmpty else {
             return .raw(stanza.map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
         }
 
         let url = uris.split(separator: "\n").first.map(String.init) ?? uris
-        let suites = split(fields["suites"] ?? "")
-        let components = split(fields["components"] ?? "")
-        let types = split(fields["types"] ?? "deb").map { Repository.Kind(rawValue: $0) ?? .deb }
-        let architectures = split(fields["architectures"] ?? "")
-        let enabled = (fields["enabled"]?.lowercased() ?? "yes") != "no"
+        let suites = split(values["suites"] ?? "")
+        let components = split(values["components"] ?? "")
+        let types = split(values["types"] ?? "deb").map { Repository.Kind(rawValue: $0) ?? .deb }
+        let architectures = split(values["architectures"] ?? "")
+        let enabled = (values["enabled"]?.lowercased() ?? "yes") != "no"
 
         var extra: [String: String] = [:]
         let modelled: Set<String> = ["uris", "suites", "components", "types", "architectures", "enabled"]
         for key in order where !modelled.contains(key) {
-            extra[key] = fields[key] ?? ""
+            extra[spellings[key] ?? key] = values[key] ?? ""
         }
 
         return .repository(Repository(
